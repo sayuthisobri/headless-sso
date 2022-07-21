@@ -6,6 +6,7 @@ import (
 	b64 "encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/fatih/color"
 	"log"
 	"os"
 	"os/user"
@@ -13,9 +14,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/git-lfs/go-netrc/netrc"
-
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/input"
 	"github.com/go-rod/rod/lib/proto"
@@ -66,36 +65,33 @@ func ssoLogin(url string) {
 	err := rod.Try(func() {
 
 		page := browser.MustPage(url)
-
+		//page.MustElement("div").MustWaitLoad()
 		// authorize
-		page.MustElementR("button", "Next").MustWaitEnabled().MustPress()
-		log.Println(page.MustInfo().Title)
+		//page.MustWaitLoad().MustScreenshot("a.png")
 
 		// sign-in
-		page.Race().ElementR("button", "Allow").MustHandle(func(e *rod.Element) {
+		page.MustWaitLoad().Race().Element("span.user-display-name").MustHandle(func(e *rod.Element) {
+		}).ElementR("button", "Allow").MustHandle(func(e *rod.Element) {
 		}).Element("#awsui-input-0").MustHandle(func(e *rod.Element) {
 			signIn(*page)
-
-			// mfa required step
-			mfa(*page)
 		}).MustDo()
 
 		// allow request
 		unauthorized := true
 		for unauthorized {
-
-			txt := page.Timeout(MFA_TIMEOUT * time.Second).MustElement(".awsui-util-mb-s").MustWaitLoad().MustText()
-			if txt == "Request approved" {
-				log.Println(txt)
+			page.Timeout(MFA_TIMEOUT*time.Second).Race().Element("span.user-display-name").MustHandle(func(e *rod.Element) {
+				log.Println("Success")
 				unauthorized = false
-			} else {
-				exists, _, _ := page.HasR("button", "Allow")
-				if exists {
-					page.MustWaitLoad().MustElementR("button", "Allow").MustClick()
+			}).ElementR("button", "Allow").MustHandle(func(e *rod.Element) {
+				e.MustClick()
+				log.Println("Allowing..")
+			}).Element(".awsui-util-mb-s").MustHandle(func(e *rod.Element) {
+				if e.MustText() == "Request approved" {
+					unauthorized = false
 				}
-
-				time.Sleep(500 * time.Millisecond)
-			}
+				log.Println(e.MustText())
+			}).MustDo()
+			time.Sleep(500 * time.Millisecond)
 		}
 
 		saveCookies(*browser)
@@ -115,15 +111,22 @@ func signIn(page rod.Page) {
 	f, _ := netrc.ParseFile(filepath.Join(usr.HomeDir, ".netrc"))
 	username := f.FindMachine("headless-sso", "").Login
 	passphrase := f.FindMachine("headless-sso", "").Password
+	totpKey := f.FindMachine("headless-sso", "").Account
 
+	log.Println("Authenticating..")
 	page.MustElement("#awsui-input-0").MustInput(username).MustPress(input.Enter)
 	page.MustElement("#awsui-input-1").MustInput(passphrase).MustPress(input.Enter)
-	log.Println(page.MustInfo().Title)
+
+	mfa(page, totpKey)
 }
 
-// TODO: allow user to enter MFA Code
-func mfa(page rod.Page) {
-	log.Println("Touch U2f...")
+func mfa(page rod.Page, key string) {
+	page.Race().ElementR("#awsui-input-0-label", "MFA code").MustHandle(func(e *rod.Element) {
+		log.Println("Handle MFA code")
+		page.MustElement("#awsui-input-0").MustInput(GetTOTPToken(key)).MustPress(input.Enter)
+	}).Element("span.user-display-name").MustHandle(func(e *rod.Element) {
+		log.Println("Success")
+	}).MustDo()
 }
 
 // load cookies
