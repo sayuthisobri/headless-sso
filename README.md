@@ -10,7 +10,7 @@ We want to avoid leaving the terminal and opening yet another tab and having to 
 ### Install
 
 ```bash
-go install github.com/mziyabo/headless-sso@latest
+go install github.com/sayuthisobri/headless-sso@latest
 ```
 
 ### Usage:
