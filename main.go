@@ -3,8 +3,9 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
-	"github.com/sayuthisobri/headless-sso/process"
+	"github.com/sayuthisobri/headless-sso/aws"
 	"github.com/urfave/cli/v2"
 	"log"
 	"os"
@@ -14,7 +15,7 @@ import (
 
 func main() {
 
-	dto := &loginDto{}
+	dto := &reqDto{}
 
 	_ = (&cli.App{
 		EnableBashCompletion:   true,
@@ -53,12 +54,38 @@ func main() {
 				Action: loginFn(dto),
 				Usage:  "Login aws sso",
 			},
+			{
+				Name:   "token",
+				Action: tokenFn(dto),
+				Usage:  "Retrieve aws developer token",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:        "instance",
+						Aliases:     []string{"i"},
+						Value:       "0",
+						Destination: &dto.instance,
+					},
+					&cli.StringFlag{
+						Name:        "profile",
+						Aliases:     []string{"p"},
+						Value:       "1",
+						Destination: &dto.profile,
+					},
+				},
+			},
 		},
 		DefaultCommand: "login",
 	}).Run(os.Args)
 }
 
-func loginFn(dto *loginDto) func(ctx *cli.Context) error {
+func tokenFn(dto *reqDto) cli.ActionFunc {
+	return func(c *cli.Context) error {
+		sso := aws.SSOHandler{IsTraceEnabled: dto.isTrace, IsDebugEnabled: dto.isDebug}
+		return sso.GetToken(dto.instance, dto.profile)
+	}
+}
+
+func loginFn(dto *reqDto) func(ctx *cli.Context) error {
 	return func(ctx *cli.Context) error {
 		var url string
 		if ctx.NArg() > 0 {
@@ -78,8 +105,18 @@ func loginFn(dto *loginDto) func(ctx *cli.Context) error {
 			log.Fatalf("No valid url found")
 		}
 		log.Printf("Proceed with url: %s", url)
-		process.SsoLogin(url, dto.isTrace, dto.isDebug)
-		return nil
+		sso := aws.SSOHandler{IsTraceEnabled: dto.isTrace, IsDebugEnabled: dto.isDebug}
+		_, err := sso.Login(url)
+		//handleError(err)
+		return err
+	}
+}
+
+func handleError(err error) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		log.Panic("Timeout")
+	} else if err != nil {
+		log.Panic(err)
 	}
 }
 
@@ -112,9 +149,11 @@ func readStdIn(timeout int) string {
 	return url
 }
 
-type loginDto struct {
-	url     string
-	isTrace bool
-	isDebug bool
-	timeout int
+type reqDto struct {
+	url      string
+	isTrace  bool
+	isDebug  bool
+	timeout  int
+	profile  string
+	instance string
 }

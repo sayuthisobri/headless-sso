@@ -1,4 +1,4 @@
-package process
+package aws
 
 import (
 	"bytes"
