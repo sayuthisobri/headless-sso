@@ -104,9 +104,9 @@ func loginFn(dto *reqDto) func(ctx *cli.Context) error {
 		if len(url) == 0 {
 			log.Fatalf("No valid url found")
 		}
-		log.Printf("Proceed with url: %s", url)
+		log.Printf("Proceed with url: [%s]", url)
 		sso := aws.SSOHandler{IsTraceEnabled: dto.isTrace, IsDebugEnabled: dto.isDebug}
-		_, err := sso.Login(url)
+		err := sso.Login(url)
 		//handleError(err)
 		return err
 	}
