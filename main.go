@@ -107,7 +107,7 @@ func loginFn(dto *reqDto) func(ctx *cli.Context) error {
 		log.Printf("Proceed with url: [%s]", url)
 		sso := aws.SSOHandler{IsTraceEnabled: dto.isTrace, IsDebugEnabled: dto.isDebug}
 		err := sso.Login(url)
-		//handleError(err)
+		handleError(err)
 		return err
 	}
 }

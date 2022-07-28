@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const MfaTimeout = 30
+const ProcessTimeout = 60
 const CacheName = ".headless-sso"
 
 func GetConfigs() []AwsConfig {

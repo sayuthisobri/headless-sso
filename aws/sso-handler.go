@@ -36,7 +36,7 @@ func (aws *SSOHandler) Login(url string) error {
 
 func (aws *SSOHandler) doLogin(browser *rod.Browser, url string) *rod.Page {
 	page := browser.MustPage(url).
-		Timeout(10 * time.Second)
+		Timeout(config.ProcessTimeout * time.Second)
 
 	successHandler := func(e *rod.Element) {
 		log.Println("Login Success")
@@ -58,12 +58,18 @@ func (aws *SSOHandler) doLogin(browser *rod.Browser, url string) *rod.Page {
 		Element("span.user-display-name").MustHandle(successHandler).
 		ElementR("button", "Allow").MustHandle(allowHandler).
 		ElementR("#awsui-input-0-label", "Username").MustHandle(func(e *rod.Element) {
-		aws.fillUpAuth(page)
+		username, passphrase, totpKey := config.GetAuth()
+
+		log.Println("Authenticating..")
+		page.MustElement("#awsui-input-0").MustInput(username).MustPress(input.Enter)
+		page.MustElement("#awsui-input-1").MustInput(passphrase).MustPress(input.Enter)
+
+		handleMfa(page, totpKey)
 	}).
 		MustDo()
 
 	for !aws.authorized {
-		page.Timeout(config.MfaTimeout*time.Second).Race().
+		page.Race().
 			Element("span.user-display-name").MustHandle(successHandler).
 			ElementR("button", "Allow").MustHandle(allowHandler).
 			Element(".awsui-util-mb-s").MustHandle(statusCheckHandler).
@@ -82,6 +88,17 @@ func (aws *SSOHandler) doLogin(browser *rod.Browser, url string) *rod.Page {
 
 	saveCookies(*browser)
 	return page
+}
+
+func handleMfa(page *rod.Page, totpKey string) *rod.Page {
+	return page.Race().ElementR("#awsui-input-0-label", "MFA code").MustHandle(func(e *rod.Element) {
+		log.Println("Handle MFA code")
+		token := GetTOTPToken(totpKey)
+		mfaInput := page.MustElement("#awsui-input-0").MustInput(token)
+		mfaInput.MustPress(input.Enter)
+		time.Sleep(1 * time.Second)
+	}).Element("span.user-display-name").MustHandle(func(e *rod.Element) {
+	}).MustDo().Page()
 }
 
 func (aws *SSOHandler) GetBrowser() (*rod.Browser, *launcher.Launcher) {
@@ -169,15 +186,6 @@ func (aws *SSOHandler) GetToken(arg string, profileArg string) error {
 	})
 }
 
-func index(slice rod.Elements, item *rod.Element) int {
-	for i := range slice {
-		if slice[i] == item {
-			return i
-		}
-	}
-	return -1
-}
-
 func (aws *SSOHandler) Cleanup(browser *rod.Browser, l *launcher.Launcher) {
 	if browser != nil {
 		browser.MustClose()
@@ -185,33 +193,6 @@ func (aws *SSOHandler) Cleanup(browser *rod.Browser, l *launcher.Launcher) {
 	if l != nil {
 		l.Cleanup()
 	}
-}
-
-func (aws *SSOHandler) fillUpAuth(page *rod.Page) {
-	username, passphrase, totpKey := config.GetAuth()
-
-	log.Println("Authenticating..")
-	if aws.IsTraceEnabled {
-		log.Println("Filling username: ", username)
-		log.Println("Filling pass: ", passphrase)
-	}
-	page.
-		MustElement("#awsui-input-0").MustInput(username).MustPress(input.Enter).
-		MustWaitStable().MustWaitLoad().Page().
-		MustElement("#awsui-input-1").MustInput(passphrase).MustPress(input.Enter)
-
-	handleMfa(page, totpKey)
-}
-
-func handleMfa(page *rod.Page, key string) {
-	page.MustWaitLoad().Race().ElementR("#awsui-input-0-label", "MFA code").MustHandle(func(e *rod.Element) {
-		log.Println("Handle MFA code")
-		token := GetTOTPToken(key)
-		mfaInput := page.MustElement("#awsui-input-0").MustInput(token)
-		mfaInput.MustPress(input.Enter)
-		time.Sleep(1 * time.Second)
-	}).Element("span.user-display-name").MustHandle(func(e *rod.Element) {
-	}).MustDo()
 }
 
 // load cookies
@@ -246,4 +227,13 @@ func saveCookies(browser rod.Browser) {
 			break
 		}
 	}
+}
+
+func index(slice rod.Elements, item *rod.Element) int {
+	for i := range slice {
+		if slice[i] == item {
+			return i
+		}
+	}
+	return -1
 }
