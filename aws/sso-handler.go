@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/sayuthisobri/headless-sso/config"
-	"golang.design/x/clipboard"
 	"log"
 	"os"
 	"path/filepath"
@@ -126,7 +125,7 @@ func (aws *SSOHandler) GetToken(arg string, profileArg string) error {
 	defer aws.Cleanup(browser, _launcher)
 
 	return rod.Try(func() {
-		page := aws.doLogin(browser, config.GetDefaultConfig().SSOStartUrl).
+		page := aws.doLogin(browser, config.GetDefaultConfig().SSOStartUrl).CancelTimeout().
 			MustElement("portal-application").MustClick().
 			Page()
 		instances := page.MustElements("portal-instance")
@@ -162,13 +161,17 @@ func (aws *SSOHandler) GetToken(arg string, profileArg string) error {
 				}
 			}
 			log.Printf("Selected profile: %s\n", profilesName[index(profiles, matchedProfile)])
-			copyBtn := matchedProfile.MustElement("#temp-credentials-button").MustClick().Page().
+			matchedProfile.MustElement("#temp-credentials-button").MustClick()
+			lines := page.Timeout(config.ProcessTimeout * time.Second).
 				MustElement("creds-modal").MustWaitStable().
-				MustElement("#hover-copy-env")
-			copyBtn.MustClick()
-
-			if data := clipboard.Read(clipboard.FmtText); len(data) > 0 {
-				f, err := os.Create(filepath.Join(config.GetHomeDir(), ".aws", "credentials"))
+				MustElement("#cli-cred-file-code").MustElements(".code-line")
+			data := ""
+			for _, line := range lines {
+				data += line.MustText() + "\n"
+			}
+			if len(data) > 0 {
+				credPath := filepath.Join(config.GetHomeDir(), ".aws", "credentials")
+				f, err := os.Create(credPath)
 
 				if err != nil {
 					log.Fatal(err)
@@ -176,11 +179,12 @@ func (aws *SSOHandler) GetToken(arg string, profileArg string) error {
 
 				defer f.Close()
 
-				_, err2 := f.Write(data)
-
-				if err2 != nil {
-					log.Fatal(err2)
+				_, err = f.WriteString(data)
+				if err != nil {
+					log.Fatal(err)
 				}
+
+				log.Printf("Successfully update credentials file: %s", credPath)
 			}
 		}
 	})

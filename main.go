@@ -81,7 +81,9 @@ func main() {
 func tokenFn(dto *reqDto) cli.ActionFunc {
 	return func(c *cli.Context) error {
 		sso := aws.SSOHandler{IsTraceEnabled: dto.isTrace, IsDebugEnabled: dto.isDebug}
-		return sso.GetToken(dto.instance, dto.profile)
+		err := sso.GetToken(dto.instance, dto.profile)
+		handleError(err)
+		return err
 	}
 }
 
