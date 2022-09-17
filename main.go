@@ -50,10 +50,10 @@ func main() {
 		},
 		Commands: []*cli.Command{
 			{
-				Name:   "login",
-				Action: loginFn(dto),
-				Usage:  "Login aws sso",
-			},
+        Name:   "login",
+        Action: loginFn(dto),
+        Usage:  "HandleUrl aws sso",
+      },
 			{
 				Name:   "token",
 				Action: tokenFn(dto),
@@ -107,9 +107,9 @@ func loginFn(dto *reqDto) func(ctx *cli.Context) error {
 			log.Fatalf("No valid url found")
 		}
 		log.Printf("Proceed with url: [%s]", url)
-		sso := aws.SSOHandler{IsTraceEnabled: dto.isTrace, IsDebugEnabled: dto.isDebug}
-		err := sso.Login(url)
-		handleError(err)
+    sso := aws.SSOHandler{IsTraceEnabled: dto.isTrace, IsDebugEnabled: dto.isDebug}
+    err := sso.HandleUrl(url)
+    handleError(err)
 		return err
 	}
 }

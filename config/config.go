@@ -1,14 +1,14 @@
 package config
 
 import (
-	"fmt"
-	"github.com/git-lfs/go-netrc/netrc"
-	"gopkg.in/ini.v1"
-	"log"
-	"os"
-	"os/user"
-	"path/filepath"
-	"strings"
+  "fmt"
+  "github.com/git-lfs/go-netrc/netrc"
+  "gopkg.in/ini.v1"
+  "log"
+  "os"
+  "os/user"
+  "path/filepath"
+  "strings"
 )
 
 const ProcessTimeout = 60
@@ -62,22 +62,30 @@ func GetCachePath() string {
 	return filepath.Join(GetHomeDir(), CacheName)
 }
 
-func GetAuth() (string, string, string) {
-	usr, _ := user.Current()
+func GetAuth() SSOAuth {
+  usr, _ := user.Current()
 
-	f, _ := netrc.ParseFile(filepath.Join(usr.HomeDir, ".netrc"))
-	username := f.FindMachine("headless-sso", "").Login
-	passphrase := f.FindMachine("headless-sso", "").Password
-	totpKey := f.FindMachine("headless-sso", "").Account
-	return username, passphrase, totpKey
+  f, _ := netrc.ParseFile(filepath.Join(usr.HomeDir, ".netrc"))
+  username := f.FindMachine("headless-sso", "").Login
+  passphrase := f.FindMachine("headless-sso", "").Password
+  totpKey := f.FindMachine("headless-sso", "").Account
+  return SSOAuth{
+    Login: username,
+    Pass:  passphrase,
+    TOTP:  totpKey,
+  }
 }
 
 type AwsConfig struct {
-	Name         string
-	SSOStartUrl  string
-	SsoRegion    string
-	SsoAccountId string
-	SsoRoleName  string
-	Region       string
-	Output       string
+  Name         string
+  SSOStartUrl  string
+  SsoRegion    string
+  SsoAccountId string
+  SsoRoleName  string
+  Region       string
+  Output       string
+}
+
+type SSOAuth struct {
+  Login, Pass, TOTP string
 }

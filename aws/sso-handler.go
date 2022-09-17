@@ -18,86 +18,79 @@ import (
 )
 
 type SSOHandler struct {
-	IsTraceEnabled bool
-	IsDebugEnabled bool
-	authorized     bool
-	attempts       int
+  IsTraceEnabled bool
+  IsDebugEnabled bool
+  authorized     bool
+  attempts       int
+  auth           config.SSOAuth
 }
 
-func (aws *SSOHandler) Login(url string) error {
-	browser, _launcher := aws.GetBrowser()
-	defer aws.Cleanup(browser, _launcher)
+func (aws *SSOHandler) HandleUrl(url string) error {
+  browser, _launcher := aws.GetBrowser()
+  defer aws.Cleanup(browser, _launcher)
 
-	return rod.Try(func() {
-		aws.doLogin(browser, url)
-	})
+  return rod.Try(func() {
+    aws.handleUrl(browser, url)
+  })
 }
 
-func (aws *SSOHandler) doLogin(browser *rod.Browser, url string) *rod.Page {
-	page := browser.MustPage(url).
-		Timeout(config.ProcessTimeout * time.Second)
+func (aws *SSOHandler) handleUrl(browser *rod.Browser, url string) *rod.Page {
+  page := browser.MustPage(url).
+    Timeout(config.ProcessTimeout * time.Second)
 
-	successHandler := func(e *rod.Element) {
-		log.Println("Login Success")
-		aws.authorized = true
-	}
-	allowHandler := func(e *rod.Element) {
-		e.MustWaitStable().MustClick()
-		log.Println("Allowing..")
-		aws.attempts = 0
-	}
-	statusCheckHandler := func(e *rod.Element) {
-		if e.MustText() == "Request approved" {
-			aws.authorized = true
-		}
-		log.Println(e.MustText())
-	}
-	page.MustWaitLoad().
-		Race().
-		Element("span.user-display-name").MustHandle(successHandler).
-		ElementR("button", "Allow").MustHandle(allowHandler).
-		ElementR("#awsui-input-0-label", "Username").MustHandle(func(e *rod.Element) {
-		username, passphrase, totpKey := config.GetAuth()
+  successHandler := func(e *rod.Element) {
+    log.Println("Login Success")
+    aws.authorized = true
+  }
+  allowHandler := func(e *rod.Element) {
+    e.MustWaitStable().MustClick()
+    log.Println("Allowing..")
+    aws.attempts = 0
+  }
+  statusCheckHandler := func(e *rod.Element) {
+    if e.MustText() == "Request approved" {
+      aws.authorized = true
+    }
+    log.Println(e.MustText())
+  }
+  loginHandler := func(e *rod.Element) {
+    aws.auth = config.GetAuth()
 
-		log.Println("Authenticating..")
-		page.MustElement("#awsui-input-0").MustInput(username).MustPress(input.Enter)
-		page.MustElement("#awsui-input-1").MustInput(passphrase).MustPress(input.Enter)
+    log.Println("Authenticating..")
+    page.MustElement("#awsui-input-0").MustInput(aws.auth.Login).MustType(input.Enter)
+    page.MustElement("#awsui-input-1").MustInput(aws.auth.Pass).MustType(input.Enter)
+  }
+  mfaHandler := func(e *rod.Element) {
+    log.Println("Handle MFA code")
+    token := GetTOTPToken(aws.auth.TOTP)
+    mfaInput := page.MustElement("#awsui-input-0").MustInput(token)
+    mfaInput.MustType(input.Enter)
+    time.Sleep(1 * time.Second)
+  }
 
-		handleMfa(page, totpKey)
-	}).
-		MustDo()
+  page.MustWaitLoad()
 
-	for !aws.authorized {
-		page.Race().
-			Element("span.user-display-name").MustHandle(successHandler).
-			ElementR("button", "Allow").MustHandle(allowHandler).
-			Element(".awsui-util-mb-s").MustHandle(statusCheckHandler).
-			Element(".awsui-alert-type-error").MustHandle(func(e *rod.Element) {
-			title := e.MustElement(".alert-header").MustText()
-			text := e.MustElement(".alert-content").MustText()
-			log.Fatalf("[ERROR] %s - %s\n", title, text)
-		}).MustDo()
+  for !aws.authorized {
+    page.Race().
+      Element("span.user-display-name").MustHandle(successHandler).
+      Element(".awsui-util-mb-s").MustHandle(statusCheckHandler).
+      ElementR("button", "Allow").MustHandle(allowHandler).
+      ElementR("#awsui-input-0-label", "Username").MustHandle(loginHandler).
+      ElementR("#awsui-input-0-label", "MFA code").MustHandle(mfaHandler).
+      Element(".awsui-alert-type-error").MustHandle(func(e *rod.Element) {
+      title := e.MustElement(".alert-header").MustText()
+      text := e.MustElement(".alert-content").MustText()
+      log.Fatalf("[ERROR] %s - %s\n", title, text)
+    }).MustDo()
 
-		if !aws.authorized && aws.attempts > 1 {
-			page.MustWaitLoad().MustScreenshot("")
-		}
-		time.Sleep(500 * time.Millisecond)
-		aws.attempts++
-	}
+    //if !aws.authorized {
+    //  log.Println("Not authorized. retry in 2s")
+    //}
+    time.Sleep(200 * time.Millisecond)
+  }
 
-	saveCookies(*browser)
-	return page
-}
-
-func handleMfa(page *rod.Page, totpKey string) *rod.Page {
-	return page.Race().ElementR("#awsui-input-0-label", "MFA code").MustHandle(func(e *rod.Element) {
-		log.Println("Handle MFA code")
-		token := GetTOTPToken(totpKey)
-		mfaInput := page.MustElement("#awsui-input-0").MustInput(token)
-		mfaInput.MustPress(input.Enter)
-		time.Sleep(1 * time.Second)
-	}).Element("span.user-display-name").MustHandle(func(e *rod.Element) {
-	}).MustDo().Page()
+  saveCookies(*browser)
+  return page
 }
 
 func (aws *SSOHandler) GetBrowser() (*rod.Browser, *launcher.Launcher) {
@@ -125,67 +118,67 @@ func (aws *SSOHandler) GetToken(arg string, profileArg string) error {
 	defer aws.Cleanup(browser, _launcher)
 
 	return rod.Try(func() {
-		page := aws.doLogin(browser, config.GetDefaultConfig().SSOStartUrl).CancelTimeout().
-			MustElement("portal-application").MustClick().
-			Page()
-		instances := page.MustElements("portal-instance")
-		instancesName := make([]string, len(instances))
-		var matchedInstance *rod.Element
-		for i, instance := range instances {
-			instancesName[i] = instance.MustElement("div.name").MustText()
-			if strconv.Itoa(i) == arg || instancesName[i] == arg {
-				matchedInstance = instance
-			}
-		}
-		if matchedInstance == nil {
-			log.Printf("No instance found for %s\n", arg)
-			log.Printf("Available instances: %s\n", strings.Join(instancesName, ", "))
-		} else {
-			log.Printf("Selected instance: %s\n", instancesName[index(instances, matchedInstance)])
-			profiles := matchedInstance.MustClick().
-				MustWaitStable().
-				MustElements("portal-profile")
-			profilesName := make([]string, len(profiles))
-			var matchedProfile *rod.Element
-			for i, profile := range profiles {
-				profilesName[i] = profile.MustElement("span.profile-name").MustText()
-				if strconv.Itoa(i) == profileArg || profilesName[i] == profileArg {
-					matchedProfile = profile
-				}
-			}
-			if matchedProfile == nil {
-				if len(profiles) == 0 {
-					log.Fatalf("No profile available for this instance\n")
-				} else {
-					matchedProfile = profiles.First()
-				}
-			}
-			log.Printf("Selected profile: %s\n", profilesName[index(profiles, matchedProfile)])
-			matchedProfile.MustElement("#temp-credentials-button").MustClick()
-			lines := page.Timeout(config.ProcessTimeout * time.Second).
-				MustElement("creds-modal").MustWaitStable().
-				MustElement("#cli-cred-file-code").MustElements(".code-line")
-			data := ""
-			for _, line := range lines {
-				data += line.MustText() + "\n"
-			}
-			if len(data) > 0 {
-				credPath := filepath.Join(config.GetHomeDir(), ".aws", "credentials")
-				f, err := os.Create(credPath)
+    page := aws.handleUrl(browser, config.GetDefaultConfig().SSOStartUrl).CancelTimeout().
+      MustElement("portal-application").MustClick().
+      Page()
+    instances := page.MustElements("portal-instance")
+    instancesName := make([]string, len(instances))
+    var matchedInstance *rod.Element
+    for i, instance := range instances {
+      instancesName[i] = instance.MustElement("div.name").MustText()
+      if strconv.Itoa(i) == arg || instancesName[i] == arg {
+        matchedInstance = instance
+      }
+    }
+    if matchedInstance == nil {
+      log.Printf("No instance found for %s\n", arg)
+      log.Printf("Available instances: %s\n", strings.Join(instancesName, ", "))
+    } else {
+      log.Printf("Selected instance: %s\n", instancesName[index(instances, matchedInstance)])
+      profiles := matchedInstance.MustClick().
+        MustWaitStable().
+        MustElements("portal-profile")
+      profilesName := make([]string, len(profiles))
+      var matchedProfile *rod.Element
+      for i, profile := range profiles {
+        profilesName[i] = profile.MustElement("span.profile-name").MustText()
+        if strconv.Itoa(i) == profileArg || profilesName[i] == profileArg {
+          matchedProfile = profile
+        }
+      }
+      if matchedProfile == nil {
+        if len(profiles) == 0 {
+          log.Fatalf("No profile available for this instance\n")
+        } else {
+          matchedProfile = profiles.First()
+        }
+      }
+      log.Printf("Selected profile: %s\n", profilesName[index(profiles, matchedProfile)])
+      matchedProfile.MustElement("#temp-credentials-button").MustClick()
+      lines := page.Timeout(config.ProcessTimeout * time.Second).
+        MustElement("creds-modal").MustWaitStable().
+        MustElement("#cli-cred-file-code").MustElements(".code-line")
+      data := ""
+      for _, line := range lines {
+        data += line.MustText() + "\n"
+      }
+      if len(data) > 0 {
+        credPath := filepath.Join(config.GetHomeDir(), ".aws", "credentials")
+        f, err := os.Create(credPath)
 
-				if err != nil {
-					log.Fatal(err)
-				}
+        if err != nil {
+          log.Fatal(err)
+        }
 
-				defer f.Close()
+        defer f.Close()
 
-				_, err = f.WriteString(data)
-				if err != nil {
-					log.Fatal(err)
-				}
+        _, err = f.WriteString(data)
+        if err != nil {
+          log.Fatal(err)
+        }
 
-				log.Printf("Successfully update credentials file: %s", credPath)
-			}
+        log.Printf("Successfully update credentials file: %s", credPath)
+      }
 		}
 	})
 }
