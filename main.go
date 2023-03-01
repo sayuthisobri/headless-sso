@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"github.com/sayuthisobri/headless-sso/aws"
 	"github.com/urfave/cli/v2"
+	"io"
 	"log"
 	"os"
+	"os/exec"
 	"regexp"
 	"time"
 )
@@ -47,13 +49,18 @@ func main() {
 				Value:       60,
 				Destination: &dto.timeout,
 			},
+			&cli.StringFlag{
+				Name:        "profile",
+				Aliases:     []string{"p"},
+				Destination: &dto.profile,
+			},
 		},
 		Commands: []*cli.Command{
 			{
-        Name:   "login",
-        Action: loginFn(dto),
-        Usage:  "HandleUrl aws sso",
-      },
+				Name:   "login",
+				Action: loginFn(dto),
+				Usage:  "HandleUrl aws sso",
+			},
 			{
 				Name:   "token",
 				Action: tokenFn(dto),
@@ -100,16 +107,44 @@ func loginFn(dto *reqDto) func(ctx *cli.Context) error {
 		if len(dto.url) != 0 {
 			url = dto.url
 		}
+
 		if len(url) == 0 {
-			url = readStdIn(dto.timeout)
+			if len(dto.profile) != 0 {
+				cmd := exec.Command("aws", "sso", "login", "--profile", dto.profile, "--no-browser")
+				result := make(chan string)
+				// pipe the commands output to the applications
+				// standard output
+				stdout, err := cmd.StdoutPipe()
+				if nil != err {
+					log.Fatalf("Error obtaining stdout: %s", err.Error())
+				}
+				reader := bufio.NewReader(stdout)
+				go func() {
+					result <- scanUrl(dto.timeout, reader)
+				}()
+
+				// Run still runs the command and waits for completion
+				// but the output is instantly piped to Stdout
+				if err := cmd.Start(); err != nil {
+					fmt.Println("could not run command: ", err)
+				}
+				select {
+				case url = <-result:
+					if len(url) == 0 {
+						_ = cmd.Process.Kill()
+					}
+				}
+			} else {
+				url = scanUrl(dto.timeout, os.Stdin)
+			}
 		}
 		if len(url) == 0 {
 			log.Fatalf("No valid url found")
 		}
 		log.Printf("Proceed with url: [%s]", url)
-    sso := aws.SSOHandler{IsTraceEnabled: dto.isTrace, IsDebugEnabled: dto.isDebug}
-    err := sso.HandleUrl(url)
-    handleError(err)
+		sso := aws.SSOHandler{IsTraceEnabled: dto.isTrace, IsDebugEnabled: dto.isDebug}
+		err := sso.HandleUrl(url)
+		handleError(err)
 		return err
 	}
 }
@@ -122,14 +157,14 @@ func handleError(err error) {
 	}
 }
 
-func readStdIn(timeout int) string {
+func scanUrl(timeout int, src io.Reader) string {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
 	result := make(chan string)
 
 	go func() {
-		scanner := bufio.NewScanner(os.Stdin)
+		scanner := bufio.NewScanner(src)
 		fmt.Printf("Wait for valid url\n")
 		for scanner.Scan() {
 			t := scanner.Text()
@@ -146,7 +181,7 @@ func readStdIn(timeout int) string {
 	case r := <-result:
 		url = r
 	case <-ctx.Done():
-		fmt.Println("timeout")
+		fmt.Println("Timeout while scan for valid url")
 	}
 	return url
 }
