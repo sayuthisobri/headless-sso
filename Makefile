@@ -7,7 +7,7 @@ build: $(BIN)
 
 $(BIN): $(SOURCES)
 	go build -ldflags="-s -w" -o $(BIN)
-	upx --lzma $(BIN)
+	#upx --best --lzma $(BIN)
 
 clean:
 	-rm $(BIN)

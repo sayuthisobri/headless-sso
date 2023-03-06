@@ -70,8 +70,10 @@ func (aws *SSOHandler) handleUrl(browser *rod.Browser, url string) *rod.Page {
 		token := GetTOTPToken(aws.auth.TOTP)
 		mfaInput := getInputField(page, e).MustInput(token)
 		mfaInput.MustType(input.Enter)
+		time.Sleep(300 * time.Millisecond)
 		page.Race().
 			ElementR("button", "Allow").MustHandle(allowHandler).
+			Element("span.user-display-name").MustHandle(successHandler).
 			Element(".awsui-alert-message").MustHandle(func(element *rod.Element) {
 			log.Fatalf("Opps: %s", element.MustText())
 		}).MustDo()
