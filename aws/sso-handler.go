@@ -1,15 +1,19 @@
 package aws
 
 import (
+	"bytes"
 	b64 "encoding/base64"
 	"encoding/json"
+	"fmt"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/sayuthisobri/headless-sso/config"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -105,19 +109,18 @@ func getInputField(page *rod.Page, label *rod.Element) *rod.Element {
 }
 
 func (aws *SSOHandler) GetBrowser() (*rod.Browser, *launcher.Launcher) {
-	var _launcher *launcher.Launcher
+	//terminateArc()
+	_launcher := launcher.New()
+	//.Bin("/Applications/Arc.app/Contents/MacOS/Arc")
 	browser := rod.New().
 		Trace(aws.IsTraceEnabled)
 
 	if aws.IsDebugEnabled {
-		_launcher = launcher.New()
-		debugUrl := _launcher.
+		_launcher.
 			Headless(false).
-			Devtools(true).
-			MustLaunch()
-		browser.ControlURL(debugUrl)
+			Devtools(true)
 	}
-	browser.MustConnect().SlowMotion(200 * time.Millisecond)
+	browser.ControlURL(_launcher.MustLaunch()).MustConnect().SlowMotion(200 * time.Millisecond)
 
 	loadCookies(*browser)
 
@@ -244,4 +247,46 @@ func index(slice rod.Elements, item *rod.Element) int {
 		}
 	}
 	return -1
+}
+
+func terminateArc() {
+	// Find the process ID (PID) of the Arc browser
+	cmd := exec.Command("ps", "aux")
+	grepCmd := exec.Command("grep", "Arc")
+
+	// Connect the output of the 'ps' command to the input of the 'grep' command
+	grepCmd.Stdin, _ = cmd.StdoutPipe()
+
+	// Connect the output of the 'grep' command to a buffer to capture the output
+	outputBuf := new(bytes.Buffer)
+	grepCmd.Stdout = outputBuf
+
+	// Start the 'grep' command first
+	_ = grepCmd.Start()
+	_ = cmd.Run()
+
+	// Wait for the 'grep' command to finish
+	_ = grepCmd.Wait()
+
+	// Extract the process ID (PID) from the grep output
+	pid := strings.Fields(outputBuf.String())[1]
+	// Convert the PID string to an actual process ID (integer)
+	pidInt, err := strconv.Atoi(pid)
+	if err != nil {
+		fmt.Println("Error converting PID:", err)
+		return
+	}
+
+	// Terminate the process by sending a termination signal
+	process, err := os.FindProcess(pidInt)
+	if err != nil {
+		fmt.Println("Error finding process:", err)
+		return
+	}
+	err = process.Signal(syscall.SIGTERM)
+	if err != nil {
+		fmt.Println("Error terminating process:", err)
+		return
+	}
+
 }

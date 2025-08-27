@@ -1,0 +1,10 @@
+version: "3.9"
+services:
+  make:
+    image: aws-sso-headless:make
+    platform: linux/amd64
+    build:
+      context: .
+    volumes:
+      - .:/home/app/src
+
